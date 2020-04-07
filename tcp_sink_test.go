@@ -807,6 +807,25 @@ func TestTCPStatsdSink(t *testing.T) {
 		}
 	})
 
+	t.Run("EmptyFlush", func(t *testing.T) {
+		ts, sink := setup(t, false)
+		defer ts.Close()
+
+		done := make(chan struct{})
+		go func() {
+			sink.Flush()
+			close(done)
+		}()
+
+		const timeout = time.Second
+		select {
+		case <-done:
+			// Ok
+		case <-time.After(timeout):
+			t.Errorf("flushing empty buffer blocked: %s", timeout)
+		}
+	})
+
 	// Test that we can successfully reconnect and flush a stat.
 	t.Run("Reconnect", func(t *testing.T) {
 		if testing.Short() {
@@ -966,6 +985,29 @@ func TestTCPStatsdSink_Integration(t *testing.T) {
 			}
 		case <-time.After(defaultRetryInterval * 2):
 			t.Fatal("Timed out waiting for command to exit")
+		}
+	})
+
+	t.Run("EmptyFlush", func(t *testing.T) {
+		exmptyFlushExe, deleteBinary := buildBinary(t, "testdata/empty_flush/empty_flush.go")
+		defer deleteBinary()
+
+		ts := newTCPTestSink(t)
+		defer ts.Close()
+
+		cmd := exec.CommandContext(ctx, exmptyFlushExe)
+		cmd.Env = ts.CommandEnv()
+
+		start := time.Now()
+
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("Running command: %s\n### output:\n%s\n###\n",
+				exmptyFlushExe, strings.TrimSpace(string(out)))
+		}
+
+		if d := time.Since(start); d > time.Second {
+			t.Errorf("Hung flushing empty stats buffer: %s", d)
 		}
 	})
 }
